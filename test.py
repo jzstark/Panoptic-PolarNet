@@ -78,7 +78,7 @@ vox_label: [1, 480, 360, 32]; mostly 0
 gt_center: [1, 1, 480, 360]; 0~1 float, mostly 0, sums up to 2028.2290
 gt_offset: [1, 2, 480, 360]; 0~1 float, mostly 0, sums up to -468.9375
 
-val_grid:
+grid: [123389, 3]
 [array([[478, 184,  30],
         [478, 184,  30],
         [478, 185,  30],
@@ -121,3 +121,38 @@ with torch.no_grad():
     center: torch.Size([1, 1, 480, 360])
     offset: torch.Size([1, 2, 480, 360])
     """
+
+    for_mask = torch.zeros(1,grid_size[0],grid_size[1],grid_size[2], dtype=torch.bool).to(pytorch_device)
+    for_mask[0,val_grid[0][:,0],val_grid[0][:,1],val_grid[0][:,2]] = True
+
+    torch.cuda.synchronize()
+    panoptic_labels,center_points = get_panoptic_segmentation(
+        torch.unsqueeze(predict_labels[0], 0),\
+        torch.unsqueeze(center[0], 0), \
+        torch.unsqueeze(offset[0], 0), val_pt_dataset.thing_list,\
+        threshold=args['model']['post_proc']['threshold'], nms_kernel=args['model']['post_proc']['nms_kernel'],\
+        top_k=args['model']['post_proc']['top_k'], polar=circular_padding,foreground_mask=for_mask
+    )
+    torch.cuda.synchronize()
+    """
+    panoptic_labels.shape: torch.Size([1, 480, 360, 32]),
+    center_points: torch.Size([1, 10, 2])
+        tensor([[[189, 142],
+         [193, 165],
+         [197, 208],
+         [200, 131],
+         [221, 180],
+         [229, 132],
+         [297, 123],
+         [301, 124],
+         [322, 173],
+         [383, 190]]], device='cuda:0')    
+    """
+    panoptic_labels = panoptic_labels.cpu().detach().numpy().astype(np.uint32)
+    panoptic = panoptic_labels[0,val_grid[0][:,0],val_grid[0][:,1],val_grid[0][:,2]]
+
+    """
+    panoptic: torch.Size([123389])
+    """
+
+    evaluator.addBatch(panoptic & 0xFFFF,panoptic,np.squeeze(val_pt_labels[0]),np.squeeze(val_pt_ints[0]))
